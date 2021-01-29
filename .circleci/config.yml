@@ -2,18 +2,32 @@ version: 2
 defaults: &defaults
   working_directory: ~/repo
   docker:
-    - image: circleci/ruby:2.3-jessie
+    - image: circleci/node:8.9.1
       auth:
         username: mydockerhub-user
         password: $DOCKERHUB_PASSWORD  # context / project UI env-var reference
 jobs:
-  build:
+  test:
     <<: *defaults
     steps:
       - checkout
+
+      - restore_cache:
+          keys:
+          - v1-dependencies-.
+          # fallback to using the latest cache if no exact match is found
+          - v1-dependencies-
+
+      - run: npm install
       - run:
-          name: Build the package
-          command: make
+          name: Run tests
+          command: npm test
+
+      - save_cache:
+          paths:
+            - node_modules
+          key: v1-dependencies-
+
       - persist_to_workspace:
           root: ~/repo
           paths: .
@@ -23,16 +37,19 @@ jobs:
       - attach_workspace:
           at: ~/repo
       - run:
-          name: Install packagecloud CLI
-          command: gem install package_cloud
+          name: Set registry URL
+          command: npm set registry https://packagecloud.io/example-user/example-repo/npm/
       - run:
-          name: Push deb package
-          command: package_cloud push example-user/example-repo/debian/jessie debs/packagecloud-test_1.1-2_amd64.deb
+          name: Authenticate with registry
+          command: echo "//packagecloud.io/example-user/example-repo/npm/:_authToken=$PACKAGECLOUD_TOKEN" > ~/repo/.npmrc
+      - run:
+          name: Publish package
+          command: npm publish
 workflows:
   version: 2
-  package-deploy:
+  test-deploy:
     jobs:
-      - build
+      - test
       - deploy:
           requires:
-            - build
+            - test
