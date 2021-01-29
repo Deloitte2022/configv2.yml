@@ -1,26 +1,56 @@
-version: 2
+version: 2.0
+
 jobs:
-  upload-artifact:
+  build:
     docker:
-      - image: circleci/openjdk:8-jdk
+      - image: circleci/ruby:2.4-node # primary container - where job steps are run
         auth:
           username: mydockerhub-user
           password: $DOCKERHUB_PASSWORD  # context / project UI env-var reference
-    working_directory: ~/repo
+      - image: circleci/postgres:9.4.12-alpine # services container
+        auth:
+          username: mydockerhub-user
+          password: $DOCKERHUB_PASSWORD  # context / project UI env-var reference
+    working_directory: ~/circleci-demo-workflows
     steps:
       - checkout
-      - run: mvn dependency:go-offline
+      # Bundle install dependencies
+      - run: bundle install --path vendor/bundle
+
+      # Database setup
+      - run: bundle exec rake db:create db:schema:load
+
       - run:
-          name: maven build
+          name: Run tests
+          command: rake
+
+  deploy:
+    machine:
+        enabled: true
+    working_directory: ~/circleci-demo-workflows
+    environment:
+      HEROKU_APP: "sleepy-refuge-55486" # define env var $HEROKU_APP
+    steps:
+      - checkout
+      - run:
+          name: Setup Heroku
+          command: bash .circleci/setup-heroku.sh # run a script to set up Heroku
+
+      - run:
           command: |
-            mvn clean install
-      - run:
-          name: Install jFrog CLI
-          command: curl -fL https://getcli.jfrog.io | sh
-      - run:
-          name: Push to Artifactory
-          command: |
-            ./jfrog rt config --url $ARTIFACTORY_URL --user $ARTIFACTORY_USER --apikey $ARTIFACTORY_APIKEY --interactive=false
-            ./jfrog rt u <path/to/artifact> <artifactory_repo_name> --build-name=<name_you_give_to_build> --build-number=$CIRCLE_BUILD_NUM
-            ./jfrog rt bce <name_you_give_to_build> $CIRCLE_BUILD_NUM  # collects all environment variables on the agent
-            ./jfrog rt bp <name_you_give_to_build> $CIRCLE_BUILD_NUM  # attaches ^^ to the build in artifactory
+            git push heroku sequential-branch-filter:master
+            heroku run rake db:migrate
+            sleep 5 # sleep for 5 seconds to wait for dynos
+            heroku restart
+
+workflows:
+  version: 2
+  build-and-deploy:
+    jobs:
+      - build
+      - deploy:
+          requires:
+            - build
+          filters:
+            branches:
+              only: sequential-branch-filter
