@@ -1,46 +1,38 @@
 version: 2
+defaults: &defaults
+  working_directory: ~/repo
+  docker:
+    - image: circleci/ruby:2.3-jessie
+      auth:
+        username: mydockerhub-user
+        password: $DOCKERHUB_PASSWORD  # context / project UI env-var reference
 jobs:
   build:
-    docker:
-      - image: cibuilds/snapcraft:stable
-        auth:
-          username: mydockerhub-user
-          password: $DOCKERHUB_PASSWORD  # context / project UI env-var reference
+    <<: *defaults
     steps:
       - checkout
       - run:
-          name: "Build Snap"
-          command: snapcraft
+          name: Build the package
+          command: make
       - persist_to_workspace:
-          root: .
-          paths:
-            - "*.snap"
-
-  publish:
-    docker:
-      - image: cibuilds/snapcraft:stable
-        auth:
-          username: mydockerhub-user
-          password: $DOCKERHUB_PASSWORD  # context / project UI env-var reference
+          root: ~/repo
+          paths: .
+  deploy:
+    <<: *defaults
     steps:
       - attach_workspace:
-          at: .
+          at: ~/repo
       - run:
-          name: "Publish to Store"
-          command: |
-            mkdir .snapcraft
-            echo $SNAPCRAFT_LOGIN_FILE | base64 --decode --ignore-garbage > .snapcraft/snapcraft.cfg
-            snapcraft push *.snap --release stable
-
-
+          name: Install packagecloud CLI
+          command: gem install package_cloud
+      - run:
+          name: Push deb package
+          command: package_cloud push example-user/example-repo/debian/jessie debs/packagecloud-test_1.1-2_amd64.deb
 workflows:
   version: 2
-  main:
+  package-deploy:
     jobs:
       - build
-      - publish:
+      - deploy:
           requires:
             - build
-          filters:
-            branches:
-              only: master
